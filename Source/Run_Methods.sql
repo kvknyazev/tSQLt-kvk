@@ -253,8 +253,27 @@ BEGIN
     DECLARE @TestCaseName NVARCHAR(MAX);
     DECLARE @TestClassId INT; SET @TestClassId = tSQLt.Private_GetSchemaId(@TestClassName);
     DECLARE @SetupProcName NVARCHAR(MAX);
+	DECLARE	@LastTestResultID INT;
+
+	DECLARE	@TestResult TABLE (
+		Class NVARCHAR(MAX) NOT NULL,
+		TestCase NVARCHAR(MAX) NOT NULL,
+		TranName NVARCHAR(MAX) NOT NULL,
+		Result NVARCHAR(MAX) NULL,
+		Msg NVARCHAR(MAX) NULL,
+		TestStartTime DATETIME NOT NULL,
+		TestEndTime DATETIME NULL
+	)
+
     EXEC tSQLt.Private_GetSetupProcedureName @TestClassId, @SetupProcName OUTPUT;
-    
+
+	IF	@SetupProcName IS NOT NULL
+	BEGIN
+		BEGIN TRAN RunTestClassTrn
+		SELECT @LastTestResultID = MAX(Id) FROM tSQLt.TestResult
+		EXEC @SetupProcName 
+	END
+
     DECLARE testCases CURSOR LOCAL FAST_FORWARD 
         FOR
      SELECT tSQLt.Private_GetQuotedFullName(object_id)
@@ -268,13 +287,27 @@ BEGIN
 
     WHILE @@FETCH_STATUS = 0
     BEGIN
-        EXEC tSQLt.Private_RunTest @TestCaseName, @SetupProcName;
+        EXEC tSQLt.Private_RunTest @TestCaseName;
 
         FETCH NEXT FROM testCases INTO @TestCaseName;
     END;
 
     CLOSE testCases;
     DEALLOCATE testCases;
+
+	IF	@SetupProcName IS NOT NULL
+	BEGIN
+		INSERT	@TestResult( Class , TestCase, TranName, Result, Msg, TestStartTime, TestEndTime)
+		SELECT	R.Class, R.TestCase, R.TranName, R.Result, R.Msg, R.TestStartTime, R.TestEndTime
+		FROM	tSQLt.TestResult R
+		WHERE	R.ID > ISNULL( @LastTestResultID, 0)
+
+		ROLLBACK TRAN RunTestClassTrn
+
+		INSERT	tSQLt.TestResult( Class, TestCase, TranName, Result, Msg, TestStartTime, TestEndTime)
+		select	R.Class, R.TestCase, R.TranName, R.Result, R.Msg, R.TestStartTime, R.TestEndTime
+		FROM	@TestResult R
+	end
 END;
 GO
 
